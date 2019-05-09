@@ -1,0 +1,155 @@
+version: "3"
+services:
+  # Traefik setup
+  traefik:
+    image: traefik:v1.2.1
+    command: -c --docker=true
+      --docker.swarmmode=true
+      --docker.domain=traefik
+      --docker.watch=true
+      --web=true
+      --debug=true
+      --defaultEntryPoints='http,https'
+      --acme=true
+      --acme.domains='techlancasterdemo.us,www.techlancasterdemo.us'
+      --acme.email=aafrey85@gmail.com
+      --acme.ondemand=true
+      --acme.onhostrule=true
+      --acme.storage=/etc/traefik/acme/acme.json
+      --acme.entryPoint=https
+      --entryPoints='Name:https Address::443 TLS'
+      --entryPoints='Name:http Address::80 Redirect.EntryPoint:https'
+    ports:
+      - 80:80
+      - 443:443
+      - 8080:8080
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "acme:/etc/traefik/acme"
+    networks:
+      - traefik-net
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  # FaaS Gateway Setup
+  gateway:
+    image: functions/gateway:latest
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - traefik-net
+    deploy:
+      labels:
+        - traefik.port=8080
+        - traefik.frontend.rule=Host:techlancasterdemo.us,www.techlancasterdemo.us
+      placement:
+        constraints: [node.role == manager]
+
+  prometheus:
+    image: quay.io/prometheus/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/alert.rules:/etc/prometheus/alert.rules
+    command: "-config.file=/etc/prometheus/prometheus.yml -storage.local.path=/prometheus -storage.local.memory-chunks=10000 --alertmanager.url=http://alertmanager:9093"
+    ports:
+      - 9090:9090
+    depends_on:
+      - gateway
+      - alertmanager
+    environment:
+      no_proxy: "gateway"
+    networks:
+      - traefik-net
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  alertmanager:
+    image: quay.io/prometheus/alertmanager
+    environment:
+      no_proxy: "gateway"
+    volumes:
+      - ./prometheus/alertmanager.yml:/alertmanager.yml
+    command:
+      - '-config.file=/alertmanager.yml'
+    networks:
+      - traefik-net
+    ports:
+      - 9093:9093
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  # Function List
+  submit_to_airtable:
+    image: aafrey/faas-demo:submit_to_airtable
+    labels:
+      function: "true"
+    depends_on:
+      - gateway
+    networks:
+      - traefik-net
+    environment:
+      no_proxy: "gateway"
+      https_proxy: $https_proxy
+    env_file: ./airtable.env
+
+  lowest_issue_count:
+    image: aafrey/faas-demo:lowest_issue_count
+    labels:
+      function: "true"
+    depends_on:
+      - gateway
+    networks:
+      - traefik-net
+    environment:
+      no_proxy: "gateway"
+      https_proxy: $https_proxy
+    env_file: ./airtable.env
+
+  assign_record_to:
+    image: aafrey/faas-demo:assign_record_to
+    labels:
+      function: "true"
+    depends_on:
+      - gateway
+    networks:
+      - traefik-net
+    environment:
+      no_proxy: "gateway"
+      https_proxy: $https_proxy
+    env_file: ./airtable.env
+
+  update_github_issue:
+    image: aafrey/faas-demo:update_github_issue
+    labels:
+      function: "true"
+    depends_on:
+      - gateway
+    networks:
+      - traefik-net
+    environment:
+      no_proxy: "gateway"
+      https_proxy: $https_proxy
+    env_file: ./github.env
+
+  logger:
+    image: aafrey/faas-demo:logger
+    labels:
+      function: "true"
+    depends_on:
+      - gateway
+    networks:
+      - traefik-net
+    environment:
+      no_proxy: "gateway"
+      https_proxy: $https_proxy
+    env_file: ./airtable.env
+
+networks:
+  traefik-net:
+    driver: overlay
+
+volumes:
+  acme:

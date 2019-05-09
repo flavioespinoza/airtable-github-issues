@@ -1,0 +1,12 @@
+node_modules
+scratch
+payload.json
+test.json
+lowestissues.json
+airtable.env
+github.env
+
+.idea
+.vscode
+
+.env
